@@ -1,45 +1,39 @@
 import os
 import time
 import datetime
+import csv
 from forex_python.converter import get_rate
 from binance import Client, ThreadedWebsocketManager, ThreadedDepthCacheManager
+from crypto_functions import Transactions
 
 client = Client(os.environ.get('BINANCE_API_KEY'), os.environ.get('BINANCE_SECRET_KEY'))
+transactions = Transactions()
 
-
-start = datetime.datetime.strptime("01/02/2021", "%d/%m/%Y")
-end = datetime.datetime.strptime("01/04/2022", "%d/%m/%Y")
-startYear2021 = int(datetime.datetime.timestamp(start)) * 1000
+end = datetime.datetime.strptime("01/01/2022", "%d/%m/%Y")
+startYear2021 = transactions.fiatLastUpdate
 endYear2021 = int(datetime.datetime.timestamp(end)) * 1000
 
+# Process fiat payments
 fiat_payments = client.get_fiat_payments_history(transactionType="0",
 	beginTime=startYear2021, endTime=endYear2021)
 
-# print(fiat_payments)
+if fiat_payments['total'] > 0:
+	for deposit in fiat_payments['data']:
 
-first_fiat = fiat_payments['data'][0]
+		if deposit['status'] != "Failed":
 
-print(first_fiat)
+			if deposit['fiatCurrency'] == "USD":
 
-boughtCrypto = first_fiat['cryptoCurrency']
+				transactions.addUSDPurchase(buyTime=int(deposit['updateTime']),
+					boughtCrypto=deposit['cryptoCurrency'], amount=deposit['obtainAmount'])
 
-if first_fiat['fiatCurrency'] == "USD":
-	t = datetime.datetime.fromtimestamp(buyTime)
-	jpy_rate = get_rate("USD", "JPY", t)	
-	buyTime = first_fiat['updateTime']
-	endTime = buyTime + 60000
+			else:
 
-	boughtSymbol = boughtCrypto + "USDT"
+				transactions.addJPYPurchase(buyTime=int(deposit['updateTime']),
+					boughtCrypto=deposit['cryptoCurrency'], jpy_price=deposit['sourceAmount'],
+					amount=deposit['obtainAmount'])
 
-
-	usdPrice = client.get_historical_klines(symbol=boughtSymbol, interval="1m", 
-		start_str=buyTime, end_str=endTime)[0][1]
-
-	print(usdPrice * jpy_rate)
-else:
-	totalUnits = first_fiat['obtainAmount']
-	costPerUnit = float(first_fiat['sourceAmount']) / float(totalUnits)
-	print(totalUnits + boughtCrypto + " at " + str(costPerUnit))
+transactions.writeTransactions()
 
 print(client.get_asset_balance(asset='BTC'))
 
