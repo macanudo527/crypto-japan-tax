@@ -68,15 +68,15 @@ class Transactions:
 		cursorObj.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='transactions' ''')
 		if cursorObj.fetchone()[0]!=1 : 
 			cursorObj.execute("CREATE TABLE transactions(id integer PRIMARY KEY AUTOINCREMENT, buyTime int, crypto text, jpy_price int, amount int)")
-			self.fiatLastUpdate = self.__getDefaultStartTime
+			self.fiatLastUpdate = self.__getDefaultStartTime()
 		else: 
 			cursorObj.execute("SELECT buyTime FROM transactions ORDER BY buyTime DESC LIMIT 1")
 			
-			updateTime = cursorObj.fetchone()[0]
+			updateTime = cursorObj.fetchone()
 			if updateTime is not None:
-				self.fiatLastUpdate = updateTime
+				self.fiatLastUpdate = updateTime[0]
 			else:
-				self.fiatLastUpdate = self.__getDefaultStartTime
+				self.fiatLastUpdate = self.__getDefaultStartTime()
 		
 		con.commit()
 
@@ -92,13 +92,12 @@ class Transactions:
 
 		for j in range(len(self.transactions)):
 			row = self.transactions[j]
-		#	cursorObj.execute("INSERT INTO transactions (buyTime, crypto, jpy_price, amount) VALUES (" + str(row[0]) + ", '" + str(row[1]) + "', " + str(row[2]) + ", " + str(row[3]) + ");")
-		#	con.set_trace_callback(print)
+			cursorObj.execute("INSERT INTO transactions (buyTime, crypto, jpy_price, amount) VALUES (" + str(row[0]) + ", '" + str(row[1]) + "', " + str(row[2]) + ", " + str(row[3]) + ");")
 			con.commit()
 
 
 		con.close()
-		with open('transactions.csv', 'w') as f:
+		with open('transactions.csv', 'a') as f:
 
 			writer = csv.writer(f)
 			writer.writerows(self.transactions)
