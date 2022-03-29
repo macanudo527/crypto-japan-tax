@@ -4,7 +4,7 @@ import datetime
 import csv
 from forex_python.converter import get_rate
 from binance import Client, ThreadedWebsocketManager, ThreadedDepthCacheManager
-from crypto_functions import Transactions, SystemState, ExchangeInfo
+from crypto_functions import Transactions, SystemState, BinanceExchange
 
 client = Client(os.environ.get('BINANCE_API_KEY'), os.environ.get('BINANCE_SECRET_KEY'))
 systemState = SystemState()
