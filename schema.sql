@@ -47,6 +47,7 @@ CREATE TABLE updates(id INTEGER PRIMARY KEY AUTOINCREMENT,
 
 INSERT INTO updates(table_name, item_id, updateTime) VALUES ('exchanges', 0, 1609426800000);
 INSERT INTO updates(table_name, item_id, updateTime) VALUES ('transactions', 0, 1609426800000);
+INSERT INTO updates(table_name, item_id, updateTime) VALUES ('deposits', 0, 1609426800000);
 
 /* Table to track the source of transaction, exchanges can have several sources each with different endpoints */
 CREATE TABLE sources(source_id INTEGER PRIMARY KEY, name TEXT, description TEXT);
@@ -62,3 +63,12 @@ CREATE TABLE transactions(transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
 
 CREATE TABLE transfers(transfer_id INTEGER PRIMARY KEY AUTOINCREMENT, insertTime INTEGER, crypto TEXT, 
 	amount DECTEXT, destination_id INTEGER, origin_id INTEGER, jpy_cost DECTEXT, usd_cost DECTEXT)
+
+# If exchange_id is NULL it is considered a private wallet.
+CREATE TABLE destination_types(destination_type_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, description TEXT,
+	network TEXT, exchange_id INTEGER,
+	FOREIGN KEY (exchange_id) REFERENCES exchanges (exchange_id));
+
+CREATE TABLE destinations(destination_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, description TEXT, 
+	network TEXT, public_key TEXT, memo TEXT, type_id INTEGER,
+	FOREIGN KEY (type_id) REFERENCES destination_types (destination_type_id));

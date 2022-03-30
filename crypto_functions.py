@@ -7,6 +7,7 @@ from sqlite3 import Error
 from decimal import Decimal
 from forex_python.converter import get_rate
 from binance import Client, ThreadedWebsocketManager, ThreadedDepthCacheManager
+from dateutil.relativedelta import relativedelta
 
 class CryptoExchange:
 
@@ -158,8 +159,19 @@ class BinanceExchange(CryptoExchange):
 
 
 
-	def getAllInterest(self):
-		pass
+	def getAllDividends(self):
+
+		# Pull just one month of data at a time. This allows for 16 assets with daily dividends, 
+		# which should be suitable for most users.
+		end = self.systemState.last_update + relativedelta(months=+1)
+
+		# Must explicitly declare 500 otherwise we just get 20.
+		dividends = self.client.get_asset_dividend_history(startTime=self.systemState.last_update, 
+			endTime=end, limit=500)
+
+		if dividends['total'] != "0":
+			for dividend in dividends['rows']:
+				# self.transactions.addUSDPurchase
 
 
 	def getAllTrades(self):
@@ -183,7 +195,7 @@ class BinanceExchange(CryptoExchange):
 	def getAllTransactions(self):
 		self.getAllDeposits()
 		self.getAllTrades()
-		self.getAllInterest()
+		# self.getAllDividends()
 
 
 
@@ -210,6 +222,48 @@ class DecimalSum:
 
 	def finalize(self):
 		return None if self.sum is None else str(self.sum)
+
+class Deposits:
+	def __init__(self):
+		self.deposits = []
+
+		# adapter and converter to store decimals in sqlite3, needed to accurately store cryptocurrency balances.
+		sqlite3.register_adapter(Decimal, lambda d: str(d))
+		sqlite3.register_converter("DECTEXT", lambda d: Decimal(d.decode('ascii')))
+
+		try:
+			self.con = sqlite3.connect('main.db', detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
+		except Error:
+			print(Error)
+
+		# Allows for the aggregation / sum of DECTEXT type columns
+		self.con.create_aggregate("decimal_sum", 1, DecimalSum)	
+
+	def addUSDDeposit(self, insertTime, coin, amount, txId, network, usd_fee):
+
+		# In the future, this may include some logic to look up fees.
+		self.deposits.append([insertTime, coin, amount, txId, network, usd_fee])
+
+	def writeTransactions(self):
+		cursorObj = self.con.cursor()
+
+		print(self.purchaseAverages)
+
+		for j in range(len(self.transactions)):
+			row = self.transactions[j]
+			cursorObj.execute("SELECT destination_id FROM destinations "
+				"WHERE ")
+			cursorObj.execute("INSERT INTO deposits (insertTime, crypto, amount, destination_id, origin_id, "
+				"usd_cost, jpy_cost) VALUES ("
+			 	+ str(row[0]) + ", '" + str(row[1]) + "', " + str(row[2]) + ", " + str(row[3]) 
+			 	+ ", " + str(row[4]) + ", " + str(row[5]) + ", " + str(row[6]) + ");")
+			cursorObj.execute("INSERT INTO updates(table_name, item_id, updateTime) VALUES ('deposits', 0, "
+				+ str(row[0]) + ");")
+			con.commit()
+
+
+		con.close()		
+
 
 class SystemState:
 	def __init__(self):
@@ -314,7 +368,7 @@ class Transactions:
 		endTime = buyTime + 60000
 
 		# Beaconed Eth is not paired directly with a stable coin, so to calculate total we need to
-		# pull Eth price is multiply it by the beth price.
+		# pull Eth price and multiply it by the beth price.
 		if quoteAsset == "BETH":
 			bethPrice = self.client.get_historical_klines(symbol="BETHETH", interval="1m", 
 				start_str=buyTime, end_str=endTime)[0][1]
@@ -341,8 +395,6 @@ class Transactions:
 		# This will be CACHED in the DB in the future
 		t = datetime.datetime.fromtimestamp(buyTime / 1000)
 		jpy_rate = decimal(get_rate("USD", "JPY", t))
-
-		# Store the USD price in cents
 		usd_price = decimal(jpy_price) / jpy_rate	
 
 		self.transactions.append([buyTime, boughtCrypto, usd_price, jpy_price, amount, Transactions.BUY, source])
@@ -372,9 +424,9 @@ class Transactions:
 
 	# Write transactions to csv
 	def writeTransactions(self):
-		con = self.__getConnection()
+		 # con = self.__getConnection()
 		
-		cursorObj = con.cursor()
+		cursorObj = self.con.cursor()
 
 		print(self.purchaseAverages)
 
@@ -393,5 +445,3 @@ class Transactions:
 
 			writer = csv.writer(f)
 			writer.writerows(self.transactions)
-
-
