@@ -62,13 +62,13 @@ CREATE TABLE transactions(transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
 	FOREIGN KEY (source_id) REFERENCES sources (source_id));
 
 CREATE TABLE transfers(transfer_id INTEGER PRIMARY KEY AUTOINCREMENT, insertTime INTEGER, crypto TEXT, 
-	amount DECTEXT, destination_id INTEGER, origin_id INTEGER, jpy_cost DECTEXT, usd_cost DECTEXT)
+	amount DECTEXT, tx_id TEXT, destination_id INTEGER, origin_id INTEGER, jpy_cost DECTEXT, usd_cost DECTEXT);
 
-# If exchange_id is NULL it is considered a private wallet.
+/* If exchange_id is NULL it is considered a private wallet. */
 CREATE TABLE destination_types(destination_type_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, description TEXT,
 	network TEXT, exchange_id INTEGER,
 	FOREIGN KEY (exchange_id) REFERENCES exchanges (exchange_id));
 
 CREATE TABLE destinations(destination_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, description TEXT, 
-	network TEXT, public_key TEXT, memo TEXT, type_id INTEGER,
+	network TEXT, address TEXT, tag TEXT, type_id INTEGER,
 	FOREIGN KEY (type_id) REFERENCES destination_types (destination_type_id));

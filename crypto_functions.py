@@ -23,6 +23,8 @@ class CryptoExchange:
 
 class BinanceExchange(CryptoExchange):
 
+	EXCHANGE_ID = 1
+
 	def __init__(self):
 
 		# Later these will be taken in and assigned dynamically with init variables, they are hard coded now
@@ -32,6 +34,7 @@ class BinanceExchange(CryptoExchange):
 		self.knownAsset = set() # We don't want to add a knownAsset twice, so we'll make it a set
 		self.systemState = SystemState()
 		self.transactions = Transactions()
+		self.deposits = Deposits()
 
 		self.__updatePairs()
 		self.__updateUserPairs()
@@ -142,20 +145,38 @@ class BinanceExchange(CryptoExchange):
 
 		# Process crypto deposits
 		# YET to be implemented: retry with different dates if the number of returned deposits is the limit.
-		crypto_deposits = self.client.get_deposit_history(startTime=startYear2021, endTime=endYear2021)
+		
+		currentStart = datetime.datetime.fromtimestamp(startYear2021 // 1000)
 
-		if len(crypto_deposits) > 0:
-			for deposit in crypto_deposits:
-				if deposit['status'] == 1:
-					if deposit['coin'] not in self.knownAsset:
-						newPairs = [k for k in availablePairs if k.endswith(deposit['coin'])]
-						self.knownAsset.add(deposit['coin'])
-						for pair in newPairs:
-							if pair not in self.knownPairs:
-								self.knownPairs.append(pair)
-								self.knownPairTimes.append([pair, deposit['coin'], deposit['insertTime']])
+		endYear2021 //= 1000
 
-					
+		# Set the current end to 90 days past currentStart
+		currentEnd =  currentStart + relativedelta(days=+90)
+		while int(currentStart.timestamp()) < endYear2021: 
+			print("StartTime " + str(int(currentStart.timestamp()) * 1000) + " EndTime " + str(int(currentEnd.timestamp()) * 1000))
+			crypto_deposits = self.client.get_deposit_history(startTime=(int(currentStart.timestamp()) * 1000), 
+				endTime=(int(currentEnd.timestamp()) * 1000))
+
+			if len(crypto_deposits) > 0:
+				for deposit in crypto_deposits:
+					if deposit['status'] == 1:
+						if deposit['coin'] not in self.knownAsset:
+							newPairs = [k for k in availablePairs if k.endswith(deposit['coin'])]
+							self.knownAsset.add(deposit['coin'])
+							for pair in newPairs:
+								if pair not in self.knownPairs:
+									self.knownPairs.append(pair)
+									self.knownPairTimes.append([pair, deposit['coin'], deposit['insertTime']])
+
+						self.deposits.addExchangeDeposit(insertTime=deposit['insertTime'], coin=deposit['coin'],
+							amount=deposit['amount'], txId=deposit['txId'], network=deposit['network'],
+							address=deposit['address'], tag=deposit['addressTag'], exchange=self.EXCHANGE_ID, 
+							usd_fee=None)
+			currentStart = currentEnd + relativedelta(seconds=+1)
+			currentEnd = currentStart + relativedelta(days=+90)
+			if int(currentEnd.timestamp()) > endYear2021:
+				currentEnd = datetime.datetime.fromtimestamp(endYear2021)
+
 
 
 
@@ -171,7 +192,7 @@ class BinanceExchange(CryptoExchange):
 
 		if dividends['total'] != "0":
 			for dividend in dividends['rows']:
-				# self.transactions.addUSDPurchase
+				pass
 
 
 	def getAllTrades(self):
@@ -194,7 +215,9 @@ class BinanceExchange(CryptoExchange):
     # Pulls all transactions from the exchange, starting with deposits, then trades, then pulling savings products
 	def getAllTransactions(self):
 		self.getAllDeposits()
+		self.deposits.writeTransactions()
 		self.getAllTrades()
+		self.transactions.writeTransactions()
 		# self.getAllDividends()
 
 
@@ -239,27 +262,63 @@ class Deposits:
 		# Allows for the aggregation / sum of DECTEXT type columns
 		self.con.create_aggregate("decimal_sum", 1, DecimalSum)	
 
-	def addUSDDeposit(self, insertTime, coin, amount, txId, network, usd_fee):
+		#Print out SQL for troubleshooting
+		self.con.set_trace_callback(print)
 
+	def addExchangeDeposit(self, insertTime, coin, amount, txId, network, address, tag, exchange, usd_fee):
+		
 		# In the future, this may include some logic to look up fees.
-		self.deposits.append([insertTime, coin, amount, txId, network, usd_fee])
+
+		# First, look up the destination type based on exchange id
+		cursorObj = self.con.cursor()
+
+		cursorObj.execute("SELECT destination_type_id from destination_types "
+			"WHERE exchange_id = ? "
+			"AND network = ?;", (exchange, network))
+		self.con.commit()
+
+		destination_type = cursorObj.fetchone()
+		if destination_type is None:
+			cursorObj.execute("INSERT INTO destination_types (name, network, exchange_id) VALUES "
+				"((SELECT name FROM exchanges WHERE exchange_id = :exchange) || ' ' || :network, "
+				":network, :exchange)",
+				{'network': network, 'exchange': exchange})
+			self.con.commit()
+			destination_type = cursorObj.lastrowid
+		else:
+			destination_type = destination_type[0]
+
+		self.deposits.append([insertTime, coin, amount, txId, network, address, tag, destination_type, usd_fee])
 
 	def writeTransactions(self):
 		cursorObj = self.con.cursor()
 
-		print(self.purchaseAverages)
-
-		for j in range(len(self.transactions)):
-			row = self.transactions[j]
+		for j in range(len(self.deposits)):
+			row = self.deposits[j]
 			cursorObj.execute("SELECT destination_id FROM destinations "
-				"WHERE ")
-			cursorObj.execute("INSERT INTO deposits (insertTime, crypto, amount, destination_id, origin_id, "
-				"usd_cost, jpy_cost) VALUES ("
-			 	+ str(row[0]) + ", '" + str(row[1]) + "', " + str(row[2]) + ", " + str(row[3]) 
-			 	+ ", " + str(row[4]) + ", " + str(row[5]) + ", " + str(row[6]) + ");")
+				"WHERE network = ? "
+				"AND address = ? "
+				"AND tag = ? "
+				"AND type_id = ?;",(row[4], row[5], row[6], row[7]))
+			self.con.commit()
+
+			destination = cursorObj.fetchone()
+			# If the destination doesn't exist create it and retrieve the id
+			if destination is None:
+				cursorObj.execute("INSERT INTO destinations (name, network, address, tag, type_id) VALUES ("
+					"?,?,?,?,?)", (str(row[7]) + row[5], row[4], row[5], row[6], row[7]))
+				self.con.commit()
+				destination_id = cursorObj.lastrowid
+			else:
+				destination_id = destination[0]
+
+
+			cursorObj.execute("INSERT INTO deposits (insertTime, crypto, amount, tx_id, destination_id, "
+				"usd_cost, jpy_cost) VALUES (?,?,?,?,?,?,?)", (str(row[0]), str(row[1]), str(row[2]),
+				str(row[3]), destination_id))
 			cursorObj.execute("INSERT INTO updates(table_name, item_id, updateTime) VALUES ('deposits', 0, "
 				+ str(row[0]) + ");")
-			con.commit()
+			self.con.commit()
 
 
 		con.close()		
@@ -324,7 +383,7 @@ class Transactions:
 			print(Error)
 
 		# Allows for the aggregation / sum of DECTEXT type columns
-		con.create_aggregate("decimal_sum", 1, DecimalSum)
+		self.con.create_aggregate("decimal_sum", 1, DecimalSum)
 
 	# looks up the USD value on binance and the exchange rate for that 
 	# day to create jpy_price
@@ -333,7 +392,7 @@ class Transactions:
 
 		# This will be CACHED in the DB in the future
 		t = datetime.datetime.fromtimestamp(buyTime / 1000)
-		jpy_rate = decimal(get_rate("USD", "JPY", t))
+		jpy_rate = Decimal(get_rate("USD", "JPY", t))
 		endTime = buyTime + 60000
 
 		if boughtCrypto == "BETH":
@@ -341,16 +400,16 @@ class Transactions:
 				start_str=buyTime, end_str=endTime)[0][1]
 			ethPrice = self.client.get_historical_klines(symbol="ETHUSDT", interval="1m", 
 				start_str=buyTime, end_str=endTime)[0][1]
-			usdTotal = decimal(bethPrice) * decimal(ethPrice) * decimal(amount)
+			usdTotal = Decimal(bethPrice) * Decimal(ethPrice) * Decimal(amount)
 
 		elif boughtCrypto not in self.stableCoins:
 			boughtSymbol = boughtCrypto + "USDT"
 
 			usdPrice = self.client.get_historical_klines(symbol=boughtSymbol, interval="1m", 
 				start_str=buyTime, end_str=endTime)[0][1]
-			usdTotal = decimal(usdPrice) * decimal(amount)
+			usdTotal = Decimal(usdPrice) * Decimal(amount)
 		else:
-			usdTotal = decimal(amount)
+			usdTotal = Decimal(amount)
 
 		jpy_price = usdTotal * jpy_rate 
 		self.transactions.append([buyTime, boughtCrypto, usdTotal, jpy_price, amount, Transactions.BUY, source])
@@ -363,7 +422,7 @@ class Transactions:
 
 		# This will be CACHED in the DB in the future
 		t = datetime.datetime.fromtimestamp(buyTime / 1000)
-		jpy_rate = decimal(get_rate("USD", "JPY", t))
+		jpy_rate = Decimal(get_rate("USD", "JPY", t))
 
 		endTime = buyTime + 60000
 
@@ -374,16 +433,16 @@ class Transactions:
 				start_str=buyTime, end_str=endTime)[0][1]
 			ethPrice = self.client.get_historical_klines(symbol="ETHUSDT", interval="1m", 
 				start_str=buyTime, end_str=endTime)[0][1]
-			usdTotal = decimal(bethPrice) * decimal(ethPrice) * decimal(amount)			 
+			usdTotal = Decimal(bethPrice) * Decimal(ethPrice) * Decimal(amount)			 
 
 		elif quoteAsset not in self.stableCoins:
 			quoteSymbol = quoteAsset + "USDT"
 
 			usdPrice = self.client.get_historical_klines(symbol=quoteSymbol, interval="1m", 
 				start_str=buyTime, end_str=endTime)[0][1]
-			usdTotal = decimal(usdPrice) * decimal(price)
+			usdTotal = Decimal(usdPrice) * Decimal(price)
 		else:
-			usdTotal = decimal(price)
+			usdTotal = Decimal(price)
 
 		jpy_price = usdTotal * jpy_rate
 		self.transactions.append([buyTime, quoteAsset, usdTotal, jpy_price, price, Transactions.SELL, source])
@@ -394,8 +453,8 @@ class Transactions:
 
 		# This will be CACHED in the DB in the future
 		t = datetime.datetime.fromtimestamp(buyTime / 1000)
-		jpy_rate = decimal(get_rate("USD", "JPY", t))
-		usd_price = decimal(jpy_price) / jpy_rate	
+		jpy_rate = Decimal(get_rate("USD", "JPY", t))
+		usd_price = Decimal(jpy_price) / jpy_rate	
 
 		self.transactions.append([buyTime, boughtCrypto, usd_price, jpy_price, amount, Transactions.BUY, source])
 		self.__addPurchase(boughtCrypto=boughtCrypto, jpy_price=jpy_price, amount=amount)
