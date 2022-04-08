@@ -54,6 +54,8 @@ CREATE TABLE sources(source_id INTEGER PRIMARY KEY, name TEXT, description TEXT)
 
 INSERT INTO sources (source_id, name, description) VALUES (1, 'Binance Fiat', 'Binance Fiat transactions');
 INSERT INTO sources (source_id, name, description) VALUES (2, 'Binance Trades', 'Binance Spot Trade transactions');
+INSERT INTO sources (source_id, name, description) VALUES (3, 'Binance Dividends', 'Binance Dividends');
+INSERT INTO sources (source_id, name, description) VALUES (4, 'Binance Dust', 'Binance Dust');
 
 /* Master table of transactions */
 CREATE TABLE transactions(transaction_id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -72,3 +74,11 @@ CREATE TABLE destination_types(destination_type_id INTEGER PRIMARY KEY AUTOINCRE
 CREATE TABLE destinations(destination_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, description TEXT, 
 	network TEXT, address TEXT, tag TEXT, type_id INTEGER,
 	FOREIGN KEY (type_id) REFERENCES destination_types (destination_type_id));
+
+CREATE TABLE income(income_id INTEGER PRIMARY KEY AUTOINCREMENT, asset TEXT, amount DECTEXT, divTime INTEGER, 
+	memo TEXT, usd_value DECTEXT, source_id INTEGER,
+	FOREIGN KEY (source_id) REFERENCES sources (source_id));
+
+CREATE TABLE balances(balance_id INTEGER PRIMARY KEY AUTOINCREMENT, changeTime INTEGER, asset TEXT, amount DECTEXT, 
+	exchange_id INTEGER,
+	FOREIGN KEY (exchange_id) REFERENCES exchanges (exchange_id));
